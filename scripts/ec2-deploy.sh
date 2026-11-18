@@ -14,6 +14,16 @@ REGISTRY="${IMAGE%%/*}"
 
 log() { echo "[deploy] $*"; }
 
+# SSM Run Command uses a minimal PATH; on Ubuntu the AWS CLI is usually a snap.
+export PATH="$PATH:/usr/local/bin:/snap/bin"
+
+for cmd in docker aws curl; do
+  command -v "$cmd" >/dev/null 2>&1 || {
+    log "ERROR: '$cmd' is not installed on this instance (see docs/aws-setup.md)"
+    exit 1
+  }
+done
+
 run_container() {
   docker run -d \
     --name "$NAME" \

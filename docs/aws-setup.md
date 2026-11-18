@@ -43,21 +43,29 @@ aws ecr put-lifecycle-policy --repository-name "$REPO" --region "$AWS_REGION" \
 1. **IAM instance role** (EC2 → trusted entity), name e.g. `hello-express-ec2`, with managed policies:
    - `AmazonSSMManagedInstanceCore` — lets SSM Run Command reach the instance (no SSH needed)
    - `AmazonEC2ContainerRegistryReadOnly` — lets the instance pull from ECR
-2. **Launch** an instance:
-   - AMI: **Amazon Linux 2023** (SSM agent, AWS CLI and curl are preinstalled)
-   - Type: `t3.micro` / `t2.micro` (x86_64 — the workflow builds `linux/amd64`;
-     for Graviton `t4g.*` change `platforms` to `linux/arm64`)
+     If the instance **already has** an instance role, attach these two policies to that
+     role instead of creating a new one (an instance can have only one role).
+2. **Instance requirements** — use an existing instance or launch a new one:
+   - Architecture **x86_64** (e.g. `t3.micro`, `t2.micro`). The workflow builds
+     `linux/amd64`; for Graviton `t4g.*` change `platforms` to `linux/arm64`.
    - IAM instance profile: the role above
-   - Security group inbound: **HTTP 80 from 0.0.0.0/0**. Port 22 is not needed.
-   - User data (installs Docker on first boot):
+   - Security group inbound: **HTTP 80 from 0.0.0.0/0**. The deploy uses SSM, so port 22
+     is only needed if you log in yourself with EC2 Instance Connect.
+   - Nothing else listening on port 80 (e.g. nginx/apache), or change the host port in
+     `scripts/ec2-deploy.sh`.
+   - **Docker**, the **AWS CLI** and **curl** installed:
 
-     ```bash
-     #!/bin/bash
-     dnf install -y docker
-     systemctl enable --now docker
-     ```
+     | OS                     | Install                                                                                                                                      |
+     | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+     | **Ubuntu** 22.04/24.04 | `sudo apt-get update && sudo apt-get install -y docker.io curl && sudo systemctl enable --now docker && sudo snap install aws-cli --classic` |
+     | **Amazon Linux 2023**  | `sudo dnf install -y docker && sudo systemctl enable --now docker` (AWS CLI and curl are preinstalled)                                       |
+
+     Ubuntu and Amazon Linux AMIs already include the **SSM agent**. You can run the
+     install command from _Systems Manager → Run Command_ (`AWS-RunShellScript`) or from an
+     EC2 Instance Connect session.
 3. Verify the instance shows as **Online** in _Systems Manager → Fleet Manager_
-   (takes 1–3 minutes after boot). Note its **instance ID** (`i-...`).
+   (takes 1–3 minutes after the role is attached; rebooting can speed this up).
+   Note its **instance ID** (`i-...`).
 
 ## 3. GitHub OIDC provider (once per AWS account)
 
