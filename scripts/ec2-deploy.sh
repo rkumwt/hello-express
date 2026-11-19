@@ -54,6 +54,18 @@ PREVIOUS="$(docker inspect --format '{{.Config.Image}}' "$NAME" 2>/dev/null || t
 log "Previous image: ${PREVIOUS:-<none>}"
 
 docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+# Any other container publishing the same host port (e.g. one started by hand with
+# docker compose) would block `docker run`. Remove it, and use its image as the
+# rollback target if this is the pipeline's first deploy.
+for id in $(docker ps -q --filter "publish=${HOST_PORT}"); do
+  OTHER_NAME="$(docker inspect --format '{{.Name}}' "$id" | sed 's#^/##')"
+  OTHER_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$id")"
+  log "Removing container '${OTHER_NAME}' (${OTHER_IMAGE}) that holds port ${HOST_PORT}"
+  PREVIOUS="${PREVIOUS:-$OTHER_IMAGE}"
+  docker rm -f "$id" >/dev/null
+done
+
 log "Starting ${IMAGE} on port ${HOST_PORT}"
 run_container "$IMAGE"
 
