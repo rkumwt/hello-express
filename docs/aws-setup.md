@@ -51,8 +51,10 @@ aws ecr put-lifecycle-policy --repository-name "$REPO" --region "$AWS_REGION" \
    - IAM instance profile: the role above
    - Security group inbound: **HTTP 80 from 0.0.0.0/0**. The deploy uses SSM, so port 22
      is only needed if you log in yourself with EC2 Instance Connect.
-   - Nothing else listening on port 80 (e.g. nginx/apache), or change the host port in
-     `scripts/ec2-deploy.sh`.
+   - No **non-Docker** service on port 80 (e.g. nginx/apache), or change the host port in
+     `scripts/ec2-deploy.sh`. Other Docker containers publishing port 80 (for example one
+     started by hand with `docker compose up`) are removed by the deploy script, so don't
+     start the app manually on the instance once the pipeline owns it.
    - **Docker**, the **AWS CLI** and **curl** installed:
 
      | OS                     | Install                                                                                                                                      |
@@ -83,6 +85,24 @@ aws iam create-open-id-connect-provider \
 assume the role. Jobs that use a GitHub Environment get the subject `environment:production`;
 jobs without one get `ref:refs/heads/main`. Allowing both keeps either setup working.
 
+> **Subject format.** GitHub's OIDC subject (`sub`) can include the numeric owner and
+> repository IDs, e.g. `repo:rkumwt@21355037/hello-express@1462770070:environment:production`
+> instead of `repo:rkumwt/hello-express:environment:production`. This repository uses the
+> ID form. IDs never change when a repo or account is renamed, so a renamed-and-recreated
+> repo can't take over the role. Build the prefix from the GitHub API:
+
+```bash
+OWNER=${GH_REPO%%/*}; NAME=${GH_REPO##*/}
+OWNER_ID=$(curl -s "https://api.github.com/users/$OWNER" | jq -r .id)
+REPO_ID=$(curl -s "https://api.github.com/repos/$GH_REPO" | jq -r .id)
+export GH_SUB="repo:${OWNER}@${OWNER_ID}/${NAME}@${REPO_ID}"
+echo "$GH_SUB"   # repo:rkumwt@21355037/hello-express@1462770070
+```
+
+If you are unsure which form your repository sends, run the workflow once and read the
+`userName` of the failed `AssumeRoleWithWebIdentity` event in **CloudTrail → Event history**
+(region = `AWS_REGION`): it is the exact `sub` GitHub sent.
+
 ```bash
 cat > trust.json <<JSON
 {
@@ -95,8 +115,8 @@ cat > trust.json <<JSON
       "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
       "StringLike": {
         "token.actions.githubusercontent.com:sub": [
-          "repo:${GH_REPO}:ref:refs/heads/main",
-          "repo:${GH_REPO}:environment:production"
+          "${GH_SUB}:ref:refs/heads/main",
+          "${GH_SUB}:environment:production"
         ]
       }
     }
@@ -171,11 +191,13 @@ aws iam put-role-policy --role-name github-actions-hello-express \
 
 ## 6. Troubleshooting
 
-| Symptom                                                   | Likely cause                                                                                                  |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | Trust policy `sub` doesn't match (check repo name / `main` / environment name), or OIDC provider missing      |
-| `InvalidInstanceId` from `send-command`                   | Instance not registered with SSM: missing instance role, SSM agent not running, or no outbound internet/HTTPS |
-| `docker: command not found` in deploy output              | User data didn't run — install Docker manually via Session Manager                                            |
-| `no basic auth credentials` on pull                       | Instance role lacks `AmazonEC2ContainerRegistryReadOnly`                                                      |
-| `exec format error` in container logs                     | CPU architecture mismatch (amd64 image on arm64 instance or vice versa)                                       |
-| Deploy succeeds but browser can't connect                 | Security group missing inbound port 80, or using `https://`                                                   |
+| Symptom                                                   | Likely cause                                                                                                                                                           |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | Trust policy `sub` doesn't match: compare it with the `userName` of the failed event in CloudTrail (ID form vs plain form, environment name), or OIDC provider missing |
+| `The repository with name '...' does not exist` on push   | ECR repository not created, or created in a different region than `AWS_REGION`                                                                                         |
+| `Bind for 0.0.0.0:80 failed: port is already allocated`   | A non-Docker process (nginx/apache) holds port 80; containers are removed automatically                                                                                |
+| `InvalidInstanceId` from `send-command`                   | Instance not registered with SSM: missing instance role, SSM agent not running, or no outbound internet/HTTPS                                                          |
+| `docker: command not found` in deploy output              | User data didn't run — install Docker manually via Session Manager                                                                                                     |
+| `no basic auth credentials` on pull                       | Instance role lacks `AmazonEC2ContainerRegistryReadOnly`                                                                                                               |
+| `exec format error` in container logs                     | CPU architecture mismatch (amd64 image on arm64 instance or vice versa)                                                                                                |
+| Deploy succeeds but browser can't connect                 | Security group missing inbound port 80, or using `https://`                                                                                                            |
