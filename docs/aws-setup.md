@@ -80,8 +80,8 @@ aws iam create-open-id-connect-provider \
 ## 4. IAM role for GitHub Actions
 
 **Trust policy** — only this repo's `main` branch and its `production` environment may
-assume the role. The build job's token subject is `ref:refs/heads/main`; the deploy job
-uses a GitHub Environment, so its subject is `environment:production`.
+assume the role. Jobs that use a GitHub Environment get the subject `environment:production`;
+jobs without one get `ref:refs/heads/main`. Allowing both keeps either setup working.
 
 ```bash
 cat > trust.json <<JSON
@@ -155,10 +155,11 @@ aws iam put-role-policy --role-name github-actions-hello-express \
 **Settings → Environments → New environment → `production`**
 
 - _Deployment branches and tags_: **Selected branches** → `main`
-- _Required reviewers_ (optional): add yourself to get a manual approval gate before deploy
-
-**Settings → Secrets and variables → Actions → Variables** (repository variables — none of
-these are secret, so no Secrets are needed):
+- _Required reviewers_ (optional): add yourself to get a manual approval gate. Both the
+  build and deploy jobs use this environment, so each would wait for approval.
+- _Environment variables_: add the variables below **here, on the `production` environment**
+  (none of them are secret, so no Secrets are needed). The workflow reads them only in jobs
+  that declare `environment: production`.
 
 | Variable          | Example                                                             |
 | ----------------- | ------------------------------------------------------------------- |

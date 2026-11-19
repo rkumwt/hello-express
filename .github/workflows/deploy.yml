@@ -19,9 +19,9 @@ permissions:
   contents: read
   id-token: write # needed for GitHub OIDC -> AWS IAM role
 
-env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+# AWS_REGION, AWS_ROLE_ARN, ECR_REPOSITORY, EC2_INSTANCE_ID and APP_URL are
+# variables of the "production" GitHub Environment, so every job that needs
+# them declares `environment: production` and reads them at job level.
 
 jobs:
   ci:
@@ -33,6 +33,10 @@ jobs:
     needs: ci
     if: inputs.image_tag == ''
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
     outputs:
       image_tag: ${{ github.sha }}
     steps:
@@ -70,6 +74,8 @@ jobs:
       name: production
       url: ${{ vars.APP_URL }}
     env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
       IMAGE_TAG: ${{ inputs.image_tag || needs.build.outputs.image_tag }}
       EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
     steps:
