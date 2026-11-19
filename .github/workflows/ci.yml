@@ -2,8 +2,11 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  # Called by deploy.yml on every push to main, so CI is not run twice there.
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   ci:
